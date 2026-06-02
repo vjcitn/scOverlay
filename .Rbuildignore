@@ -1,0 +1,13 @@
+^\.git$
+^\.gitignore$
+^\.Rhistory$
+^\.Rproj\.user$
+^\.Ruserdata$
+^\.DS_Store$
+^\.vscode$
+^\.idea$
+^\.coverage$
+^\.\.Rcheck$
+^.*\.Rcheck$
+^Rplots\.pdf$
+^scratch\.R$

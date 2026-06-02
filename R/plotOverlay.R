@@ -1,0 +1,934 @@
+#' Plot layered information on a single-cell embedding
+#'
+#' \code{plotOverlay} creates a layered plot of a reduced dimension
+#' representation stored in a \linkS4class{SingleCellExperiment} object. It
+#' first creates a background layer, dims this background with a semi-transparent
+#' white overlay, and finally draws a foreground variable on top using an
+#' independent colour scale. When a layer is set to \code{"none"}, the
+#' corresponding point layer is kept in the plot structure without drawing
+#' visible points.
+#'
+#' This representation is useful to highlight gene expression, scores,
+#' annotations or selected groups of cells while keeping the complete embedding
+#' visible as context.
+#'
+#' @details
+#' The function uses two visual layers. The background layer is used to show the
+#' global structure of the embedding, usually coloured by a cell annotation such
+#' as a cluster, sample or cell type. Either layer can also be set to
+#' \code{"none"} to keep the layer position without drawing visible points. The
+#' foreground layer is then drawn on top and can represent a fixed-colour
+#' selection, a feature from one of the assays, typically a gene expression
+#' value, or a variable stored in \code{colData(sce)}.
+#'
+#' The foreground can be restricted to a subset of cells using
+#' \code{fg_subset_cells}. This only affects the foreground layer: cells not
+#' selected by \code{fg_subset_cells} are still shown in the background. This is
+#' the main idea of the overlay plot and allows highlighting a particular group
+#' of cells without losing the context of the whole dataset.
+#'
+#' The foreground colour scale is independent from the background colour scale.
+#' Palettes can be specified by name, as a vector of colours, or as a palette
+#' function. See \code{\link{getPalette}} and \code{\link{listPalettes}} for the
+#' available palettes and palette handling rules. For continuous palettes, colour
+#' vectors are used as anchors and interpolated internally.
+#'
+#' For dense embeddings, the background and foreground point layers can be
+#' rasterized independently with \code{bg_raster} and \code{fg_raster}. Only the
+#' point layers are rasterized; axes, labels, legends and other plot elements
+#' remain vector graphics.
+#'
+#' @param sce A \linkS4class{SingleCellExperiment} object containing the reduced
+#' dimensions and the data to plot. The object must contain the reduced
+#' dimension specified in \code{reduced_dim}. If \code{background} or
+#' \code{foreground} is a feature, the object must also contain the
+#' corresponding assay specified in \code{bg_assay} or \code{fg_assay}.
+#'
+#' @param foreground A single character value specifying the variable to draw in
+#' the foreground layer. It can be \code{"solid"} to draw selected foreground
+#' cells with a fixed colour, \code{"none"} to draw no visible foreground
+#' points, a feature in \code{rownames(sce)}, in which case values are taken
+#' from \code{fg_assay}, or a column in \code{colData(sce)}. This argument has
+#' no default and must be provided by the user.
+#'
+#' @param background A single character value specifying the background layer.
+#' It can be \code{"solid"} to draw all background cells with a fixed colour,
+#' \code{"none"} to draw no visible background points, a feature in
+#' \code{rownames(sce)}, or a column in \code{colData(sce)}. Defaults to
+#' \code{"solid"}.
+#'
+#' @param reduced_dim A single character value with the name of the reduced
+#' dimension to plot. It must be one of \code{reducedDimNames(sce)}. Only the
+#' first two dimensions are used. Defaults to \code{"TSNE"}.
+#'
+#' @param fg_subset_cells A cell subset defining which cells are shown in the
+#' foreground layer. It can be \code{NULL}, a logical vector of length
+#' \code{ncol(sce)}, a character vector with cell names, a function receiving
+#' \code{sce} and returning a logical vector, or an expression evaluated in
+#' \code{colData(sce)}. \code{NULL} selects all cells. \code{NA} values are
+#' treated as \code{FALSE}. If no cells match, an empty foreground layer is
+#' drawn and a warning is emitted. Defaults to \code{NULL}.
+#'
+#' @param bg_type A character value indicating how the background variable should
+#' be represented when \code{background} is not \code{"solid"} or \code{"none"}.
+#' Accepted values are \code{"auto"}, \code{"continuous"} and
+#' \code{"categorical"}. With \code{"auto"}, feature values are treated as
+#' continuous and \code{colData} variables are treated as continuous only when
+#' they are numeric. Defaults to \code{"auto"}.
+#'
+#' @param fg_type A character value indicating how the foreground variable should
+#' be represented when \code{foreground} is not \code{"solid"} or \code{"none"}.
+#' Accepted values are \code{"auto"}, \code{"continuous"} and
+#' \code{"categorical"}. With \code{"auto"}, feature values are treated as
+#' continuous and \code{colData} variables are treated as continuous only when
+#' they are numeric. Defaults to \code{"auto"}.
+#'
+#' @param bg_assay A single character value with the name of the assay to use
+#' when \code{background} is a feature in \code{rownames(sce)}. It is ignored
+#' when \code{background = "solid"} or \code{background = "none"}. Defaults to
+#' \code{"logcounts"}.
+#'
+#' @param fg_assay A single character value with the name of the assay to use
+#' when \code{foreground} is a feature in \code{rownames(sce)}. It is ignored
+#' when \code{foreground = "solid"} or \code{foreground = "none"}. Defaults to
+#' \code{"logcounts"}.
+#'
+#' @param fg_order A character value controlling the drawing order of foreground
+#' cells. Accepted values are \code{"input"}, \code{"random"},
+#' \code{"ascending"} and \code{"descending"}. \code{"input"} keeps the current
+#' order, \code{"random"} randomly shuffles foreground cells,
+#' \code{"ascending"} draws lower foreground values first and higher values on
+#' top, and \code{"descending"} does the opposite. \code{"ascending"} is useful
+#' for expression plots because cells with higher expression are drawn last. For
+#' reproducible random ordering, call \code{set.seed()} before
+#' \code{plotOverlay()}. Defaults to \code{"input"}.
+#'
+#' @param bg_point_size Numeric value with the point size of the background
+#' layer. Defaults to \code{4}.
+#'
+#' @param fg_point_size Numeric value with the point size of the foreground
+#' layer. Defaults to \code{1}.
+#'
+#' @param bg_palette Palette specification for the background layer. It is
+#' ignored when \code{background = "none"}. When \code{background = "solid"},
+#' \code{NULL} uses \code{"gray70"} and a single valid colour can be used to set
+#' the solid background colour. For variable backgrounds, it can be \code{NULL},
+#' a palette name, a vector of colours or a palette function, and the value is
+#' passed to \code{\link{getPalette}}. Defaults to \code{NULL}, which uses
+#' \code{"gray_red"} for continuous backgrounds and \code{"scOverlay"} for
+#' categorical backgrounds.
+#'
+#' @param fg_palette Palette specification for the foreground layer. It is
+#' ignored when \code{foreground = "none"}. When \code{foreground = "solid"},
+#' \code{NULL} uses \code{"red"} and a single valid colour can be used to set the
+#' solid foreground colour. For variable foregrounds, it can be \code{NULL}, a
+#' palette name, a vector of colours or a palette function, and the value is
+#' passed to \code{\link{getPalette}}. For continuous foregrounds, colour vectors
+#' are interpreted as gradient anchors and interpolated internally. Defaults to
+#' \code{NULL}, which uses \code{"gray_red"} for continuous foregrounds and
+#' \code{"scOverlay"} for categorical foregrounds.
+#'
+#' @param bg_raster Logical value. If \code{TRUE}, rasterize the background point
+#' layer using \code{ggrastr::geom_point_rast()}. Defaults to \code{FALSE}.
+#'
+#' @param fg_raster Logical value. If \code{TRUE}, rasterize the foreground point
+#' layer using \code{ggrastr::geom_point_rast()}. Defaults to \code{FALSE}.
+#'
+#' @param raster_dpi Positive numeric value with the resolution, in dots per
+#' inch, used for rasterized point layers. Defaults to \code{300}.
+#'
+#' @param bg_dimming Numeric value between 0 and 1 controlling the opacity of the
+#' white dimming layer placed between background and foreground. A value of
+#' \code{0} does not dim the background and a value of \code{1} completely covers
+#' it with white. Defaults to \code{0.9}.
+#'
+#' @param fg_limits Limits for the foreground colour scale when the foreground is
+#' continuous. It can be \code{NULL}, a strictly increasing numeric vector of
+#' length two, or \code{"shared"}. In a single plot, \code{"shared"} resolves to
+#' the range of foreground values drawn in that plot. It is ignored with a
+#' warning when the foreground layer is not continuous. Defaults to \code{NULL}.
+#'
+#' @param bg_limits Limits for the background colour scale when the background is
+#' continuous. It can be \code{NULL}, a strictly increasing numeric vector of
+#' length two, or \code{"shared"}. In a single plot, \code{"shared"} resolves to
+#' the range of background values in that plot. It is ignored with a warning when
+#' the background layer is not continuous. Defaults to \code{NULL}.
+#'
+#' @param bg_legend Logical value indicating whether to show the background
+#' legend. It is ignored when \code{background = "solid"} or
+#' \code{background = "none"}. Defaults to \code{TRUE}.
+#'
+#' @param fg_legend Logical value indicating whether to show the foreground
+#' legend. It is ignored when \code{foreground = "solid"} or
+#' \code{foreground = "none"}. Defaults to \code{TRUE}.
+#'
+#' @param bg_legend_title Character value with the title of the background
+#' legend. If \code{NULL}, \code{background} is used. Defaults to \code{NULL}.
+#'
+#' @param fg_legend_title Character value with the title of the foreground
+#' legend. If \code{NULL}, \code{foreground} is used. Defaults to \code{NULL}.
+#'
+#' @param title Character value with the plot title. If \code{NULL},
+#' \code{foreground} is used, except when \code{foreground = "none"}, where an
+#' empty title is used. Defaults to \code{NULL}.
+#'
+#' @param bg_values Categorical value set for the background
+#' scale. This is used by grouped plotting helpers to keep categorical colours
+#' consistent across panels. Not intended for users.
+#'
+#' @param fg_values Categorical value set for the foreground
+#' scale. This is used by grouped plotting helpers to keep categorical colours
+#' consistent across panels. Not intended for users.
+#'
+#' @return A \pkg{ggplot2} object with the background, dimming and foreground
+#' layers.
+#'
+#' @seealso \code{\link{plotGeneOverlay}},
+#' \code{\link{plotOverlayPerGroup}},
+#' \code{\link{plotOverlayPerNestedGroup}}, \code{\link{getPalette}} and
+#' \code{\link{listPalettes}}.
+#'
+#' @examples
+#' data("sce_overlay_example")
+#'
+#' # Overlay the expression of a gene on top of the cluster annotation.
+#' p1 <- plotOverlay(
+#'     sce = sce_overlay_example,
+#'     reduced_dim = "TSNE",
+#'     background = "cluster",
+#'     foreground = "SOX10"
+#' )
+#' p1
+#'
+#' # Use a solid background and draw higher expression values on top.
+#' p2 <- plotOverlay(
+#'     sce = sce_overlay_example,
+#'     reduced_dim = "TSNE",
+#'     background = "solid",
+#'     foreground = "S100B",
+#'     fg_order = "ascending"
+#' )
+#' p2
+#'
+#' # Restrict the foreground to one sample type while keeping all cells in the
+#' # background.
+#' p3 <- plotOverlay(
+#'     sce = sce_overlay_example,
+#'     reduced_dim = "UMAP",
+#'     background = "cluster",
+#'     foreground = "SOX10",
+#'     fg_subset_cells = quote(sample_type == "ANNUBP")
+#' )
+#' p3
+#'
+#' # Use a custom continuous palette and rasterize the background point layer.
+#' p4 <- plotOverlay(
+#'     sce = sce_overlay_example,
+#'     reduced_dim = "TSNE",
+#'     background = "sample_type",
+#'     foreground = "SOX10",
+#'     fg_palette = c("#E6E6E6", "#EF6F6C", "#67000D"),
+#'     bg_raster = TRUE
+#' )
+#' p4
+#'
+#' @export
+
+plotOverlay <- function(
+		sce,
+		foreground,                    
+		background = "solid",          
+		reduced_dim = "TSNE",          
+		fg_subset_cells = NULL,        
+		bg_type = c("auto","continuous","categorical"),
+		fg_type = c("auto","continuous","categorical"),
+		bg_assay = "logcounts",        
+		fg_assay = "logcounts",        
+		fg_order = c("input", "random", "ascending", "descending"),
+		bg_point_size = 4,
+		fg_point_size = 1,
+		bg_palette = NULL,
+		fg_palette = NULL,
+		bg_raster = FALSE,
+		fg_raster = FALSE,
+		raster_dpi = 300,
+		bg_dimming = 0.9,              
+		fg_limits = NULL,
+		bg_limits = NULL,
+		bg_legend = TRUE,
+		fg_legend = TRUE,
+		bg_legend_title = NULL,
+		fg_legend_title = NULL,
+		title = NULL,
+		bg_values = NULL,
+		fg_values = NULL
+) {
+	.validate_sce(sce)
+	if (!is.numeric(bg_dimming) || length(bg_dimming) != 1L ||
+			is.na(bg_dimming) || !is.finite(bg_dimming) ||
+			bg_dimming < 0 || bg_dimming > 1) {
+		stop("`bg_dimming` must be a single numeric value between 0 and 1.", call. = FALSE)
+	}
+	if (!.is_flag(bg_legend)) {
+		stop("`bg_legend` must be TRUE or FALSE.", call. = FALSE)
+	}
+	if (!.is_flag(fg_legend)) {
+		stop("`fg_legend` must be TRUE or FALSE.", call. = FALSE)
+	}
+	.validate_raster_args(bg_raster, fg_raster, raster_dpi)
+	.validate_string_arg(background, "background")
+	.validate_string_arg(foreground, "foreground")
+	.validate_layer_limits(bg_limits, "bg_limits")
+	.validate_layer_limits(fg_limits, "fg_limits")
+	
+	# Extract embedding coordinates
+	coords <- .get_reduced_dim_coords(sce, reduced_dim)
+	
+		bg_type <- match.arg(bg_type)
+		fg_type <- match.arg(fg_type)
+		fg_order <- match.arg(fg_order)
+
+		bg <- .resolve_overlay_variable(
+			sce = sce,
+			variable = background,
+			layer_name = "background",
+			assay = bg_assay,
+			type = bg_type
+		)
+		coords$background <- bg$values
+		if (identical(bg$type, "categorical")) {
+			coords$background <- as.character(coords$background)
+		}
+		
+		fg <- .resolve_overlay_variable(
+			sce = sce,
+			variable = foreground,
+					layer_name = "foreground",
+					assay = fg_assay,
+					type = fg_type
+				)
+		coords$foreground <- fg$values
+		fg_type <- fg$type
+		
+	if (identical(fg$type, "none")) {
+		coords_fg <- coords[0, , drop = FALSE]
+	} else {
+		# Apply subset filter to foreground only (background remains complete)
+		idx <- .eval_subset(fg_subset_cells, sce)
+		coords$foreground[!idx] <- NA
+
+		# Create filtered coords for foreground layer (only subset cells with non-NA foreground)
+		coords_fg <- coords[!is.na(coords$foreground), ]
+		coords_fg <- .order_foreground(coords_fg, fg_order)
+	}
+
+	bg_limits <- .resolve_layer_limits(
+		limits = bg_limits,
+		values = coords$background,
+		type = bg$type,
+		arg_name = "bg_limits",
+		layer_name = "background"
+	)
+	fg_limits <- .resolve_layer_limits(
+		limits = fg_limits,
+		values = coords_fg$foreground,
+		type = fg$type,
+		arg_name = "fg_limits",
+		layer_name = "foreground"
+	)
+	
+		# === Build ggplot ===
+		# Background layer
+		if (identical(bg$type, "none")) {
+			p <- ggplot(coords, aes(.data$X, .data$Y)) +
+				.geom_point_overlay(
+					data = coords[0, , drop = FALSE],
+					mapping = aes(.data$X, .data$Y),
+					raster = FALSE,
+					color = "transparent",
+					size = 0,
+					na.rm = TRUE
+				)
+		} else if (identical(bg$type, "solid")) {
+			bg_colour <- .resolve_solid_bg_colour(bg_palette)
+			p <- ggplot(coords, aes(.data$X, .data$Y)) +
+				.geom_point_overlay(
+				raster = bg_raster,
+				raster_dpi = raster_dpi,
+				color = bg_colour,
+					size = bg_point_size
+				)
+		} else if (identical(bg$type, "continuous")) {
+			pal_bg <- getPalette(bg_palette, type = "continuous", n = 256)
+			p <- ggplot(coords, aes(.data$X, .data$Y, colour = .data$background)) +
+				.geom_point_overlay(
+					raster = bg_raster,
+					raster_dpi = raster_dpi,
+					size = bg_point_size
+				) +
+				scale_colour_gradientn(
+					name = bg_legend_title %||% background,
+					colours = pal_bg,
+					limits = bg_limits,
+					guide = if (bg_legend) "colourbar" else "none"
+				)
+		} else {
+			bg_values <- .resolve_categorical_values(bg_values, coords$background)
+			pal_bg <- getPalette(
+				bg_palette,
+			type = "categorical",
+			n = max(1L, length(bg_values)),
+			values = bg_values
+		)
+		p <- ggplot(coords, aes(.data$X, .data$Y, colour = .data$background)) +
+			.geom_point_overlay(
+				raster = bg_raster,
+				raster_dpi = raster_dpi,
+				size = bg_point_size
+			) +
+			scale_colour_manual(
+				name = bg_legend_title %||% background,
+				values = pal_bg,
+				limits = bg_values,
+				guide = if (bg_legend) "legend" else "none"
+			)
+	}
+	
+	# Dim background
+	dim_alpha <- if (identical(bg$type, "none")) 0 else bg_dimming
+	p <- p + annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf,
+										fill = "white", alpha = dim_alpha)
+	
+		# Foreground layer
+			if (fg$type == "none") {
+				p <- p + .geom_point_overlay(
+					data = coords_fg,
+					mapping = aes(.data$X, .data$Y),
+					raster = FALSE,
+					color = "transparent",
+					size = 0,
+					na.rm = TRUE
+				)
+			} else if (fg$type == "solid") {
+				fg_colour <- .resolve_solid_fg_colour(fg_palette)
+				p <- p + .geom_point_overlay(
+					data = coords_fg,
+					mapping = aes(.data$X, .data$Y),
+					raster = fg_raster,
+					raster_dpi = raster_dpi,
+					color = fg_colour,
+					size = fg_point_size,
+					na.rm = TRUE
+				)
+			} else {
+				p <- p + ggnewscale::new_scale_color()
+			}
+		
+			if (fg$type == "continuous") {
+			pal_fg <- getPalette(fg_palette, type = "continuous", n = 256)
+
+		p <- p + .geom_point_overlay(
+				data = coords_fg,
+				mapping = aes(.data$X, .data$Y, colour = .data$foreground),
+				raster = fg_raster,
+				raster_dpi = raster_dpi,
+				size = fg_point_size,
+				na.rm = TRUE
+			) +
+			scale_colour_gradientn(
+				name = fg_legend_title %||% foreground,
+				colours = pal_fg,
+				limits = fg_limits,
+				guide = if (fg_legend) "colourbar" else "none"
+			)
+		
+			} else if (fg$type == "categorical") {
+			coords_fg$foreground <- as.character(coords_fg$foreground)
+			fg_values <- .resolve_categorical_values(fg_values, coords_fg$foreground)
+			n_fg <- max(1L, length(fg_values))
+			pal_fg <- getPalette(
+			fg_palette,
+			type = "categorical",
+			n = n_fg,
+			values = fg_values
+		)
+
+		p <- p + .geom_point_overlay(
+				data = coords_fg,
+				mapping = aes(.data$X, .data$Y, colour = .data$foreground),
+				raster = fg_raster,
+				raster_dpi = raster_dpi,
+				size = fg_point_size,
+				na.rm = TRUE
+			) +
+			scale_colour_manual(
+				name = fg_legend_title %||% foreground,
+				values = pal_fg,
+				limits = fg_values,
+				guide = if (fg_legend) "legend" else "none"
+			)
+	}
+	
+	# Titles
+	p <- p + theme_classic()
+	if (identical(bg$type, "none")) {
+		p <- p + ggplot2::coord_cartesian(
+			xlim = range(coords$X, na.rm = TRUE),
+			ylim = range(coords$Y, na.rm = TRUE)
+		)
+	}
+	if (!is.null(title)) p <- p + labs(title = title)
+	else if (identical(fg$type, "none")) p <- p + labs(title = "")
+	else p <- p + labs(title = foreground)
+	
+	return(p)
+}
+
+
+
+# Helper for NULL defaults
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+
+# Helper for scalar logical flags
+.is_flag <- function(x) is.logical(x) && length(x) == 1L && !is.na(x)
+
+# Helper to validate scalar character arguments
+.validate_string_arg <- function(x, arg_name) {
+	if (!is.character(x) || length(x) != 1L || is.na(x)) {
+		stop("`", arg_name, "` must be a single non-NA character string.", call. = FALSE)
+	}
+	return(invisible(TRUE))
+}
+
+# Helper to validate colour scale limit arguments.
+.validate_layer_limits <- function(limits, arg_name) {
+	if (is.null(limits)) {
+		return(invisible(TRUE))
+	}
+	if (is.character(limits) && length(limits) == 1L && !is.na(limits) &&
+			identical(limits, "shared")) {
+		return(invisible(TRUE))
+	}
+	if (!is.numeric(limits) || length(limits) != 2L) {
+		stop("`", arg_name, "` must be NULL, \"shared\", or a numeric vector of length 2.", call. = FALSE)
+	}
+	if (any(is.na(limits)) || any(!is.finite(limits))) {
+		stop("`", arg_name, "` must contain two finite non-NA values.", call. = FALSE)
+	}
+	if (!(limits[1] < limits[2])) {
+		stop("`", arg_name, "` must be strictly increasing.", call. = FALSE)
+	}
+	return(invisible(TRUE))
+}
+
+# Helper to resolve NULL/numeric/"shared" limits for one layer.
+.resolve_layer_limits <- function(limits, values, type, arg_name, layer_name, warn = TRUE) {
+	.validate_layer_limits(limits, arg_name)
+	if (is.null(limits)) {
+		return(NULL)
+	}
+	if (!identical(type, "continuous")) {
+		if (isTRUE(warn)) {
+			warning(
+				"`", arg_name, "` is ignored because the ",
+				layer_name,
+				" layer is not continuous.",
+				call. = FALSE
+			)
+		}
+		return(NULL)
+	}
+	if (is.character(limits) && identical(limits, "shared")) {
+		return(.range_or_null(values, arg_name))
+	}
+	return(limits)
+}
+
+# Helper to compute finite ranges without breaking empty pipeline-safe plots.
+.range_or_null <- function(values, arg_name) {
+	values <- values[!is.na(values) & is.finite(values)]
+	if (length(values) == 0L) {
+		warning(
+			"`", arg_name, " = \"shared\"` could not be computed because no finite values are available.",
+			call. = FALSE
+		)
+		return(NULL)
+	}
+	limits <- range(values)
+	if (identical(limits[1], limits[2])) {
+		limits <- limits + c(-0.5, 0.5)
+	}
+	return(limits)
+}
+
+# Helper to resolve global categorical values for consistent panel palettes.
+.resolve_categorical_values <- function(values, fallback) {
+	if (is.null(values)) {
+		values <- unique(na.omit(as.character(fallback)))
+	} else {
+		values <- unique(na.omit(as.character(values)))
+	}
+	return(values)
+}
+
+# Helper to compute shared limits and categorical values before panel splitting.
+.resolve_grouped_layer_settings <- function(sce,
+																					 background,
+																					 foreground,
+																					 bg_type,
+																					 fg_type,
+																					 bg_assay,
+																					 fg_assay,
+																					 subset_idx,
+																					 bg_limits,
+																					 fg_limits) {
+	bg <- .resolve_overlay_variable(
+		sce = sce,
+		variable = background,
+		layer_name = "background",
+		assay = bg_assay,
+		type = bg_type
+	)
+	fg <- .resolve_overlay_variable(
+		sce = sce,
+		variable = foreground,
+		layer_name = "foreground",
+		assay = fg_assay,
+		type = fg_type
+	)
+
+	resolved_bg_limits <- .resolve_layer_limits(
+		limits = bg_limits,
+		values = bg$values,
+		type = bg$type,
+		arg_name = "bg_limits",
+		layer_name = "background"
+	)
+	fg_values_for_limits <- if (identical(fg$type, "none")) {
+		fg$values
+	} else {
+		fg$values[subset_idx]
+	}
+	resolved_fg_limits <- .resolve_layer_limits(
+		limits = fg_limits,
+		values = fg_values_for_limits,
+		type = fg$type,
+		arg_name = "fg_limits",
+		layer_name = "foreground"
+	)
+
+	bg_values <- NULL
+	if (identical(bg$type, "categorical")) {
+		bg_values <- .resolve_categorical_values(NULL, bg$values)
+	}
+	fg_values <- NULL
+	if (identical(fg$type, "categorical")) {
+		fg_values <- .resolve_categorical_values(NULL, fg$values[subset_idx])
+	}
+
+	return(list(
+		bg_limits = resolved_bg_limits,
+		fg_limits = resolved_fg_limits,
+		bg_values = bg_values,
+		fg_values = fg_values
+	))
+}
+
+# Helper to validate rasterization controls
+.validate_raster_args <- function(bg_raster, fg_raster, raster_dpi) {
+	if (!.is_flag(bg_raster)) {
+		stop("`bg_raster` must be TRUE or FALSE.", call. = FALSE)
+	}
+	if (!.is_flag(fg_raster)) {
+		stop("`fg_raster` must be TRUE or FALSE.", call. = FALSE)
+	}
+	if (!is.numeric(raster_dpi) || length(raster_dpi) != 1L ||
+			is.na(raster_dpi) || !is.finite(raster_dpi) || raster_dpi <= 0) {
+		stop("`raster_dpi` must be a single positive finite numeric value.", call. = FALSE)
+	}
+	return(invisible(TRUE))
+}
+
+# Helper to construct vector or raster point layers
+.geom_point_overlay <- function(data = NULL, mapping = NULL, raster = FALSE, raster_dpi = 300, ...) {
+	if (isTRUE(raster)) {
+		return(ggrastr::geom_point_rast(
+			data = data,
+			mapping = mapping,
+			raster.dpi = raster_dpi,
+			...
+		))
+	}
+
+	return(ggplot2::geom_point(
+		data = data,
+		mapping = mapping,
+		...
+	))
+}
+
+# Helper to validate SingleCellExperiment inputs
+.validate_sce <- function(sce) {
+	if (!inherits(sce, "SingleCellExperiment")) {
+		stop("`sce` must be a SingleCellExperiment object.", call. = FALSE)
+	}
+	return(invisible(TRUE))
+}
+
+# Helper to validate colData column arguments
+.validate_coldata_column <- function(sce, column, arg_name) {
+	if (!is.character(column) || length(column) != 1L || is.na(column)) {
+		stop("`", arg_name, "` must be a single non-NA character string.", call. = FALSE)
+	}
+
+	cd_names <- colnames(SingleCellExperiment::colData(sce))
+	if (!(column %in% cd_names)) {
+		stop(
+			"`", arg_name, "` must be one of colnames(colData(sce)): ",
+			paste(cd_names, collapse = ", "),
+			".",
+			call. = FALSE
+		)
+	}
+
+	return(invisible(TRUE))
+}
+
+# Helper to resolve a feature, colData column, or optional solid layer.
+.resolve_overlay_variable <- function(sce,
+																			variable,
+																			layer_name,
+																			assay = "logcounts",
+																			type = c("auto", "continuous", "categorical")) {
+	type <- match.arg(type)
+	if (identical(variable, "solid")) {
+		return(list(
+			values = rep("all", ncol(sce)),
+			type = "solid",
+			source = "solid",
+			label = variable
+		))
+	}
+	if (identical(variable, "none")) {
+		return(list(
+			values = rep(NA_character_, ncol(sce)),
+			type = "none",
+			source = "none",
+			label = variable
+		))
+	}
+
+	if (variable %in% SummarizedExperiment::rownames(sce)) {
+		assay_arg <- .layer_arg_name(layer_name, "assay")
+		.validate_string_arg(assay, assay_arg)
+		if (!(assay %in% SummarizedExperiment::assayNames(sce))) {
+			stop(
+				"`", assay_arg, "` must be one of assayNames(sce). Unknown assay: ",
+				assay,
+				".",
+				call. = FALSE
+			)
+		}
+		values <- as.numeric(SummarizedExperiment::assay(sce, assay)[variable, ])
+		if (identical(type, "auto")) {
+			type <- "continuous"
+		}
+		.validate_overlay_variable_type(values, type, layer_name)
+		return(list(
+			values = values,
+			type = type,
+			source = "assay",
+			label = variable
+		))
+	}
+
+	if (variable %in% colnames(SummarizedExperiment::colData(sce))) {
+		values <- SummarizedExperiment::colData(sce)[[variable]]
+		if (identical(type, "auto")) {
+			type <- if (is.numeric(values)) "continuous" else "categorical"
+		}
+		.validate_overlay_variable_type(values, type, layer_name)
+		return(list(
+			values = values,
+			type = type,
+			source = "colData",
+			label = variable
+		))
+	}
+
+	stop(
+		"`", layer_name, "` must be \"solid\", \"none\", a feature in rownames(sce), or a column in colData(sce). ",
+		"Unknown ", layer_name, ": ", variable, ".",
+		call. = FALSE
+	)
+}
+
+# Helper to validate layer values against the requested scale type.
+.validate_overlay_variable_type <- function(values, type, layer_name) {
+	if (identical(type, "continuous") && !is.numeric(values)) {
+		type_arg <- .layer_arg_name(layer_name, "type")
+		stop(
+			"`", type_arg, " = 'continuous'` requires a numeric ",
+			layer_name,
+			" variable.",
+			call. = FALSE
+		)
+	}
+	return(invisible(TRUE))
+}
+
+# Helper to map layer names to public argument names.
+.layer_arg_name <- function(layer_name, suffix) {
+	prefix <- switch(
+		layer_name,
+		background = "bg",
+		foreground = "fg",
+		layer_name
+	)
+	return(paste0(prefix, "_", suffix))
+}
+
+# Helper to extract and validate reduced dimension coordinates
+.get_reduced_dim_coords <- function(sce, reduced_dim) {
+	rd_names <- SingleCellExperiment::reducedDimNames(sce)
+	if (!(reduced_dim %in% rd_names)) {
+		stop(
+			"`reduced_dim` must be one of reducedDimNames(sce): ",
+			paste(rd_names, collapse = ", "),
+			call. = FALSE
+		)
+	}
+
+	rd <- SingleCellExperiment::reducedDim(sce, reduced_dim)
+	if (ncol(rd) < 2L) {
+		stop(
+			"Reduced dimension `", reduced_dim, "` must contain at least two columns.",
+			call. = FALSE
+		)
+	}
+
+	coords <- as.data.frame(rd[, seq_len(2L), drop = FALSE])
+	names(coords) <- c("X", "Y")
+	return(coords)
+}
+
+# Helper to resolve the fixed colour used for background = "solid"
+.resolve_solid_bg_colour <- function(bg_palette) {
+	if (is.null(bg_palette)) return("gray70")
+	if (!is.character(bg_palette) || length(bg_palette) != 1L || is.na(bg_palette)) {
+		stop("`bg_palette` must be NULL or a single valid colour when `background = \"solid\"`.", call. = FALSE)
+	}
+	if (!.is_colour_vector(bg_palette)) {
+		stop("`bg_palette` must be NULL or a single valid colour when `background = \"solid\"`.", call. = FALSE)
+	}
+	return(bg_palette)
+}
+
+# Helper to resolve the fixed colour used for foreground = "solid"
+.resolve_solid_fg_colour <- function(fg_palette) {
+	if (is.null(fg_palette)) return("red")
+	if (!is.character(fg_palette) || length(fg_palette) != 1L || is.na(fg_palette)) {
+		stop("`fg_palette` must be NULL or a single valid colour when `foreground = \"solid\"`.", call. = FALSE)
+	}
+	if (!.is_colour_vector(fg_palette)) {
+		stop("`fg_palette` must be NULL or a single valid colour when `foreground = \"solid\"`.", call. = FALSE)
+	}
+	return(fg_palette)
+}
+
+# Helper to order foreground rows before plotting
+.order_foreground <- function(coords_fg, fg_order) {
+	fg_order <- match.arg(fg_order, c("input", "random", "ascending", "descending"))
+
+	if (identical(fg_order, "input")) {
+		return(coords_fg)
+	}
+
+	if (nrow(coords_fg) == 0L) {
+		return(coords_fg)
+	}
+
+	if (identical(fg_order, "random")) {
+		idx <- sample(seq_len(nrow(coords_fg)))
+		return(coords_fg[idx, , drop = FALSE])
+	}
+
+	foreground <- coords_fg$foreground
+
+	if (identical(fg_order, "ascending")) {
+		idx <- order(foreground, na.last = FALSE)
+		return(coords_fg[idx, , drop = FALSE])
+	}
+
+	if (identical(fg_order, "descending")) {
+		idx <- order(foreground, decreasing = TRUE, na.last = FALSE)
+		return(coords_fg[idx, , drop = FALSE])
+	}
+
+	stop("`fg_order` must be one of \"input\", \"random\", \"ascending\", or \"descending\".", call. = FALSE)
+}
+
+# Helper to avoid repeating the expected empty-subset warning in grouped plots.
+.with_empty_subset_warning_muffled <- function(expr) {
+	msg <- "`fg_subset_cells` did not match any cells; drawing an empty foreground layer."
+	value <- withCallingHandlers(
+		expr,
+		warning = function(w) {
+			if (identical(conditionMessage(w), msg)) {
+				invokeRestart("muffleWarning")
+			}
+		}
+	)
+	return(value)
+}
+
+# Helper to evaluate fg_subset_cells
+.eval_subset <- function(fg_subset_cells, sce) {
+	ncells <- ncol(sce)
+
+	validate_subset <- function(x, source) {
+		if (!is.logical(x)) {
+			stop("`fg_subset_cells` evaluated from ", source, " must return a logical vector.", call. = FALSE)
+		}
+		if (length(x) != ncells) {
+			stop("`fg_subset_cells` evaluated from ", source, " must have length ncol(sce) (", ncells, "), not ", length(x), ".", call. = FALSE)
+		}
+		if (anyNA(x)) {
+			warning("`fg_subset_cells` contains NA values; treating them as FALSE.", call. = FALSE)
+			x[is.na(x)] <- FALSE
+		}
+		if (!any(x)) {
+			warning("`fg_subset_cells` did not match any cells; drawing an empty foreground layer.", call. = FALSE)
+		}
+		return(x)
+	}
+
+	if (is.null(fg_subset_cells)) {
+		return(rep(TRUE, ncells))
+	} else if (is.logical(fg_subset_cells)) {
+		return(validate_subset(fg_subset_cells, "a logical vector"))
+	} else if (is.character(fg_subset_cells)) {
+		cell_names <- colnames(sce)
+		if (is.null(cell_names)) {
+			stop("`fg_subset_cells` cannot select cell names because colnames(sce) is NULL.", call. = FALSE)
+		}
+		missing_names <- setdiff(fg_subset_cells, cell_names)
+		if (length(missing_names) > 0L) {
+			stop("`fg_subset_cells` contains cell names not present in colnames(sce): ", paste(missing_names, collapse = ", "),	".", call. = FALSE)
+		}
+		return(validate_subset(cell_names %in% fg_subset_cells, "cell names"))
+	} else if (is.function(fg_subset_cells)) {
+		res <- fg_subset_cells(sce)
+		return(validate_subset(res, "a function"))
+	} else if (is.language(fg_subset_cells)) { # quoted expression
+		res <- tryCatch(
+			with(as.data.frame(colData(sce)), eval(fg_subset_cells)),
+			error = function(e) {
+				stop("`fg_subset_cells` expression could not be evaluated against colData(sce): ", conditionMessage(e),	call. = FALSE	)
+			}
+		)
+		return(validate_subset(res, "an expression"))
+	} else {
+		stop("`fg_subset_cells` must be NULL, a logical vector, a character vector of cell names, a function, or an expression.",	call. = FALSE)
+	}
+}

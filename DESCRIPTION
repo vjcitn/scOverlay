@@ -1,0 +1,43 @@
+Package: scOverlay
+Type: Package
+Title: Multilayer plots for single-cell data
+Version: 0.1.17
+Authors@R: 
+    c(person(given = "Bernat", family = "Gel", role = c("aut", "cre", "fnd"),
+             email = "bgel@igtp.cat",
+             comment = c(ORCID = "0000-0001-8878-349X")))
+Description: scOverlay provides publication-grade plotting helpers to display a
+    foreground feature (gene expression or metadata) on top of a contextual
+    background (clusters, cell types, samples, or a solid colour) in the same reduced
+    dimension panel, each with independent colour scales (via ggnewscale).
+    It integrates with SingleCellExperiment / SummarizedExperiment, supports
+    flexible subsetting of foreground cells, multiple assays (e.g. counts,
+    logcounts), and grid arrangements by user-defined grouping columns.
+License: Artistic-2.0
+Encoding: UTF-8
+Depends: 
+    R (>= 4.6.0)
+Imports:
+    ggplot2,
+    ggnewscale,
+    SummarizedExperiment,
+    SingleCellExperiment,
+    viridisLite,
+    scales,
+    RColorBrewer,
+    patchwork,
+    ggrastr,
+    rlang
+Suggests:
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0),
+    BiocStyle
+VignetteBuilder: 
+    knitr
+Roxygen: list(markdown = TRUE)
+URL: https://github.com/bernatgel/scOverlay
+BugReports: https://github.com/bernatgel/scOverlay/issues
+biocViews: Software, Visualization, SingleCell, Transcriptomics, GeneExpression, DataRepresentation
+Config/testthat/edition: 3
+Config/roxygen2/version: 8.0.0

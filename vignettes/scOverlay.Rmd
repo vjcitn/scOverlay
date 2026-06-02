@@ -1,0 +1,629 @@
+---
+title: "scOverlay: layered visualization of single-cell embeddings"
+author:
+- name: Bernat Gel
+  affiliation: Translational Cancer Genomics and Bioinformatics, IGTP
+package: scOverlay
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+vignette: >
+  %\VignetteIndexEntry{scOverlay: layered visualization of single-cell embeddings}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(
+    collapse = TRUE,
+    comment = "#>",
+    fig.width = 5,
+    fig.height = 4,
+    fig.align="center",
+    dpi = 96,
+    fig.retina = 1,
+    dev = "png"
+    
+)
+
+```
+
+# Introduction
+
+Dimensionality reduction plots such as TSNE and UMAP are commonly used to explore single-cell datasets. These plots are useful to represent the global structure of the data (represented by the positions of the points) usually accompanied by a variable such as gene expression, clustering, cell-type or QC values which are represented in the color of the points. However, the traditional approach to to these plots is limited to a single variable and we cannot respresent at the same time the expression of a gene while keeping the distribution of samples, cell types or clusters visible as a reference.
+
+`scOverlay` is designed to solve this by creating multi-layered plots for single-cell data. Using a simple layered representation, it creates a background layer colored according to a given variable (e.g. cell-type) and then draws the foreground variable on top using an independent colour scale (e.g. gene-expression). An optional dimming value partially mutes the background layer so it does not interfere with the correct interpretation of the foreground one. 
+
+Therefore, the background layer provides the context and the foreground layer is used to highlight the variable of interest, such as the expression of a gene, a score, a cell annotation...
+
+A key additional feature of `scOverlay` is that subsetting can be applied to the foreground layer. This means that we can highlight the cells from a specific sample, sample type or condition while still showing the complete embedding in the background. This is useful when comparing where different groups of cells are located in the same reduced dimension space and is really helpful in identifying composition differences in related samples or sample types.
+
+`scOverlay` works with `SingleCellExperiment` objects and only need the object to contain at least one reduced dimension representation, such as `"TSNE"` or `"UMAP"`, and the variables to be plotted either in the assays or in `colData`.
+
+The package is focused on visualizing already processed single-cell data and not intended to perform single-cell preprocessing, normalization or dimensionality reduction, which can be done with of the the many Bioconductor packages for single-cell data processing.
+
+# Installation
+
+`scOverlay` can be installed with `BiocManager` following the standard procedure which will install `scOverlay` and all its dependencies:
+
+```{r install-bioconductor, eval=FALSE}
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+    install.packages("BiocManager")
+}
+
+BiocManager::install("scOverlay")
+```
+
+After installation, the package can be loaded with:
+
+```{r load-package-example, eval=FALSE}
+library(scOverlay)
+```
+
+
+
+# Quick start
+
+We will start by loading the package and the example data included (more information in the next section).
+
+```{r load-package-and-example-data, eval=TRUE, results="hide", message=FALSE, warning=FALSE}
+library(scOverlay)
+library(SingleCellExperiment)
+
+data("sce_mpnst_example")
+```
+
+and we can view the content of the example data, a `SingleCellExperiment` object created from a series of 10X scRNAseq experiments, with 22K cells and 76 genes (more details in a later section).
+
+```{r view-example-data, eval=TRUE}
+sce_mpnst_example
+```
+
+
+The simplest `scOverlay` plot shows all cells in the background and overlays a foreground variable on top. In this first example, the background shows the sample type annotation (tumor type in this example) and the foreground shows the expression of `CDH19`. In this case we also adjust the size of the background points so they are clearly
+
+```{r quick-start-1}
+plotOverlay(
+    sce = sce_mpnst_example,
+    foreground = "CDH19",
+    background = "sample_type",
+    bg_dimming = 0.7,
+    reduced_dim = "TSNE"    
+)
+```
+
+By default, the examples in this vignette use the `"TSNE"` reduced dimension. Other reduced dimensions can be selected with the `reduced_dim` argument. For example, the same plot could be drawn on the UMAP coordinates by setting `reduced_dim = "UMAP"`.
+
+We can select different backgrounds too: a solid colour, `"none"` for no visible background points, a gene  or a cell annotation. For example, cells can be coloured in the background by `cluster`, while the foreground shows the doublet score stored in `colData(sce_mpnst_example)$scDblFinder.score`. We can also ajust multiple visual parameters, such as palettes, point sizes, titles, etc...
+
+```{r quick-start-background}
+plotOverlay(
+    sce = sce_mpnst_example,
+    reduced_dim = "UMAP",
+    foreground = "scDblFinder.score",
+    fg_palette = "viridis",
+    fg_point_size = 0.5,
+    background = "cluster",
+    bg_palette = "pastel",
+    bg_point_size = 4,
+    bg_dimming = 0.6,
+    bg_legend = FALSE,
+    title = "Doublet score over clusters"
+)
+```
+
+One of the main uses of `scOverlay` is to highlight only a subset of cells while keeping the complete dataset visibke in the background as context. Here we plot `CDH19` expression only in the cells from one sample. The background still contains all cells.
+
+```{r quick-start-sample-subset}
+plotOverlay(
+    sce = sce_mpnst_example,
+    foreground = "CDH19",
+    fg_point_size = 0.8,
+    background = "cluster",
+    reduced_dim = "TSNE",
+    fg_subset_cells = quote(sample == "38ANF1"),
+    title = "CDH19 in 50PNF",
+    bg_dimming = 0.9,
+    bg_legend = FALSE
+)
+
+```
+
+
+
+# Loading the package and example data
+
+`scOverlay` includes an example dataset that we'll use throughout this vignette, including in the previous section.
+
+```{r load-data}
+data("sce_mpnst_example")
+sce_mpnst_example
+```
+
+The object `sce_mpnst_example` is a `SingleCellExperiment` and is included with the package to demonstrate the plotting functionality. It is a subset of a full scRNAseq experiment from the single-cell MPNST progression dataset deposited at the European Genome-phenome Archive under accession `EGAS50000001747`. The included dataset only has a small selection of genes and stripped-down cell and sample annotations.
+
+The most important elements for `scOverlay` are the reduced dimensions, the assays and the cell metadata, called colData.
+
+```{r inspect-object}
+reducedDimNames(sce_mpnst_example)
+assayNames(sce_mpnst_example)
+colnames(colData(sce_mpnst_example))
+```
+
+The reduced dimensions define the coordinates used for plotting. In this vignette we will use mainly use `"TSNE"` as the default reduced dimension, but `"UMAP"` is also included and can be plotted in the exact same way.
+
+The assay names indicate where gene expression values are stored. The examples below assume that the object contains a `"logcounts"` assay, which is the default assay used by `plotOverlay()` when the foreground is a gene.
+
+The columns in `colData(sce_mpnst_example)` contain cell-level annotations that can be used as background variables, foreground variables or to select subsets of cells.
+
+Finally, we can check that some of the genes used in the examples are present in the object:
+
+```{r inspect-genes}
+c("SOX10", "S100B", "CDH19", "MKI67") %in% rownames(sce_mpnst_example)
+```
+
+
+
+# The basic overlay model
+
+The main idea behind `scOverlay` is to separate the information used as context from the information we want to highlight. The background layer shows the complete embedding. The foreground layer is drawn on top and can represent a gene, a cell metadata column, a score, etc in the whole dataset or a subset of cells.
+
+As seen in the "Quick Start" section, a first example could be to plot the expression of a gene over the sample type annotation, in this case telling us from which tumor type come each cell.
+
+```{r overlay-model-gene, eval=FALSE}
+plotOverlay(
+    sce = sce_mpnst_example,
+    foreground = "CDH19",
+    background = "sample_type",
+    reduced_dim = "TSNE"    
+)
+```
+
+However, the foreground does not have to be a gene. It can also be a column in `colData(sce)`. for example the clusters, samples, cell types, doublet scores, etc... The background can use the same data sources, or a solid colour.
+
+The foreground can also be restricted to a specific subset of cells. This makes it possible to ask questions such as where the cells from a particular sample type are located in the dimensionality reduction embedding, while still seeing the complete structure of the data in the background.
+
+The following sections describe these components in more detail.
+
+# Choosing the foreground and background
+
+The foreground layer contains the variable we want to highlight while the background provides the context. They can be a gene or feature in `rownames(sce)` or a column in `colData(sce)`, but also `"solid"` for a fixed-colour selection or `"none"` for no visible points.
+
+When the foreground is a gene, expression values are taken from the assay specified by `fg_assay`. By default, `plotOverlay()` uses the `"logcounts"` assay. The same happens for background with `bg_assay`.
+
+The data layers (foreground and background) can also show cell annotations in `colData(sce)`. Typically, it can be the cluster, the samples, sample types... but can also be any other column, including continuos (non-categorical) values such as doublet-scores and other QC-related values. The type of value used (continuous or categorical) is autodetected, but we can specify it explicitly with `fg_type = "categorical"` or `fg_type = "continuous"` (and `bg_type = "categorical"` or `bg_type = "continuous"` for the background). This will affect the coloring schemes used to plot them.
+
+*Important:* autodetection of value types is simple: if it's a numeric vector, assume it's continuous, if it's anything else, treat it as categorical. This works largely fine, but for some cases (such as clusters) where categories (clusters) are specified as integers, we might need to either convert the column in colData to a factor or explicitly specify `fg_type = "categorical"`.
+
+```{r foreground-numeric-metadata, eval=FALSE}
+plotOverlay(
+    sce = sce_mpnst_example,
+    foreground = "scDblFinder.score",
+    fg_type = "continuous",
+    background = "cluster",
+    bg_type = "categorical",
+    reduced_dim = "TSNE"
+)
+```
+
+In addition to represening a variable, both foreground and background can be set to `solid` or `none`. These are special values that will plot all points of the same color with `solid` or plot no points at all in that layer if set to `none`. If a layer is set to `solid`, by default it will be plotted as gray dots. We can use `fg_palette` and `bg_palette` to change their color.
+
+We can also alter the ordering of the cells when plotting with `fg_order` and `bg_order`. This might be useful to avoid visual artifacts when plotting the cells as ordered in the `SingleCellExperiment` object (usually sorted by sample) or to improve the visibility of positive cells in very dense plots. To avoid plotting the cell sorted per sample we could use `fg_order = "random"` which would randomize the plotting order. To ensure that positive cells are visible over the negative ones we can plot them with `fg_order = "ascending"`.
+
+Finally, we can subset the foreground layer (and only the foreground! background is not subsettable) with `fg_subset_cells`, showing only a subset of the cells. We can use anything as a filter. The most straightforward selection criteria is an expression evaluated in
+`colData(sce)`, such as `fg_subset_cells = quote(sample_type == "MPNST")`. However, a logical vector, a vector of cell names or even a function receiving the `SingleCellExperiment` object and returning a logical vector are also valid criteria. 
+
+```{r foreground-example}
+p4 <- plotOverlay(
+    sce = sce_mpnst_example,
+    foreground = "scDblFinder.score",
+    fg_type = "continuous",
+    fg_order = "ascending",
+    fg_subset_cells = quote(sample_type != "MPNST"),
+    reduced_dim = "TSNE",
+    background = "cluster",
+    bg_point_size = 3,
+    title = "scDblFinder.score in non-MPNST samples",
+    bg_legend = FALSE
+)
+p4
+```
+
+
+# Plotting several genes
+
+When we want to inspect several genes, we can call `plotOverlay()` repeatedly, but `plotGeneOverlay()` provides a compact convenience function. It creates one overlay plot for each requested gene and returns the plots as a named list.
+
+```{r gene-overlay-list}
+gene_plots <- plotGeneOverlay(
+    sce = sce_mpnst_example,
+    genes = c("S100B", "CDH19", "PRRX1", "EGFR"),
+    background = "solid",
+    reduced_dim = "TSNE",
+    fg_order = "ascending"
+)
+
+names(gene_plots)
+```
+
+Each element of the list is a regular `ggplot2` object and can be displayed independently.
+
+```{r gene-overlay-single, eval=FALSE}
+gene_plots$CDH19
+```
+
+All additional arguments are passed to `plotOverlay()`. For example, we can use a metadata background and keep the same foreground ordering.
+
+And the plots can also be combined for example with `patchwork`.
+
+
+```{r gene-overlay-background, fig.width=12, fig.height=8, fig.wide=TRUE}
+library(patchwork)
+
+gene_plots_bg <- plotGeneOverlay(
+    sce = sce_mpnst_example,
+    genes = c("SOX10", "CDH19", "PRRX1", "EGFR"),
+    background = "sample_type",
+    reduced_dim = "TSNE",
+    fg_order = "ascending",
+    bg_dimming = 0.7
+)
+
+(gene_plots_bg$SOX10 + gene_plots_bg$CDH19) /
+    (gene_plots_bg$PRRX1 + gene_plots_bg$EGFR)
+```
+
+If some of the requested genes are not present in the object, they are skipped with a warning. This makes it possible to use the same gene list with different objects, as long as at least one of the requested genes is present.
+
+```{r gene-overlay-missing, warning=TRUE}
+gene_plots_subset <- plotGeneOverlay(
+    sce = sce_mpnst_example,
+    genes = c("SOX10", "NOT_A_GENE"),
+    background = "solid",
+    reduced_dim = "TSNE",
+    fg_order = "ascending"
+)
+
+names(gene_plots_subset)
+```
+
+# Splitting plots by groups
+
+The function `plotOverlayPerGroup()` creates one overlay plot for each value of a metadata column. This is useful when we want to compare the same foreground variable across sample types, clusters, conditions or other cell annotations.
+
+In each panel, the background still shows the complete embedding but the foreground layer is restricted to the cells belonging to the corresponding group.
+
+By default, the group order follows the factor levels if the grouping column is a factor, or the order of appearance in the object otherwise. An explicit order can be supplied with `group_order`.
+
+```{r per-group-sample-type-order, fig.width=12, fig.height=3, fig.wide=TRUE}
+p2 <- plotOverlayPerGroup(
+    sce = sce_mpnst_example,
+    group_col = "sample_type",
+    group_order = c("Nerve", "PNF", "ANF", "MPNST"),
+    foreground = "CDH19",
+    background = "cluster",
+    reduced_dim = "TSNE",
+    fg_order = "ascending",
+    fg_legend = FALSE,
+    bg_legend = FALSE,
+    bg_dimming = 0.9
+)
+p2
+```
+
+An additional foreground subset can be combined with the group-wise split. This allows us to show, for example, one plot per sample type while restricting the foreground to cells with a particular annotation.
+
+```{r per-group-extra-subset, fig.width=12, fig.height=3, fig.wide=TRUE}
+p4 <- plotOverlayPerGroup(
+    sce = sce_mpnst_example,
+    group_col = "sample_type",
+    group_order = c("Nerve", "PNF", "ANF", "MPNST"),
+    foreground = "S100B",
+    background = "cluster",
+    reduced_dim = "TSNE",
+    fg_subset_cells = quote(celltype.main == "Schwann cell"),
+    fg_order = "ascending",
+    fg_legend = FALSE,
+    bg_legend = FALSE
+)
+p4
+```
+
+## Shared scales and legends
+
+When plotting the same gene or other value in multiple plots, it's important to have them all sharing the same limits for the scales. `fg_limits` and `bg_limits` can be used to specify exact limits (e.g. `fg_limits=c(0,6)`) if available or already computed. Another option is to use the `shared` option. `fg_limits = "shared"` computes one foreground range valid for all plots in the group,  `bg_limits = "shared"` does the same for continuous backgrounds across all cells. Chared limits computation is performed after applying any global foreground subset and before splitting into groups. Compatible legends can be collected with `shared_legend = TRUE` and moved with regular patchwork syntax.
+
+```{r per-group-shared-scales, fig.width=12, fig.height=4.5, fig.wide=TRUE}
+p_shared <- plotOverlayPerGroup(
+    sce = sce_mpnst_example,
+    group_col = "sample_type",
+    group_order = c("Nerve", "PNF", "ANF", "MPNST"),
+    foreground = "CDH19",
+    background = "cluster",
+    bg_dimming = 0.9,
+    reduced_dim = "TSNE",
+    fg_order = "ascending",
+    fg_legend = TRUE,
+    bg_legend = FALSE,
+    fg_limits = "shared",
+    shared_legend = TRUE    
+)
+
+p_shared & ggplot2::theme(legend.position = "bottom")
+```
+
+For categorical variables, grouped and nested plots use global categorical values to keep colour assignments consistent across panels. Named categorical palettes are recommended when comparing panels, especially when some panels lack some categories.
+
+
+
+# Nested group plots
+
+`plotOverlayPerNestedGroup()` is useful when there are two related grouping variables. A common situation is to have cells grouped by sample, with samples belonging to broader sample types or experimental conditions.
+
+In this example, `group_col = "sample"` defines the individual panels and `outer_col = "sample_type"` arranges the samples according to their sample type.
+
+As in `plotOverlayPerGroup()`, each panel keeps the complete embedding as background. The foreground layer is restricted to the cells from the corresponding sample. This makes it possible to compare where individual samples are located in the same reduced dimension space.
+
+The row and panel order can be controlled with `outer_order` and `group_order`. Here we explicitly order the sample types.
+
+```{r nested-groups-1, fig.width=12, fig.height=12, fig.wide=TRUE}
+p1 <- plotOverlayPerNestedGroup(
+    sce = sce_mpnst_example,
+    group_col = "sample",
+    outer_col = "sample_type",
+    outer_order = c("Nerve", "PNF", "ANF", "MPNST"),
+    foreground = "CDH19",
+    background = "cluster",
+    reduced_dim = "TSNE",
+    bg_dimming = 0.9,
+    fg_order = "ascending",
+    fg_limits = "shared",
+    shared_legend = TRUE,
+    bg_legend = FALSE
+)
+p1
+```
+
+Nested plots can also be combined with an additional foreground subset. In this example, one plot is created per sample, but only cells annotated as Mesenchymal as their main cell type are shown in the foreground. 
+
+```{r nested-groups-2, fig.width=12, fig.height=12, fig.wide=TRUE}
+p1 <- plotOverlayPerNestedGroup(
+    sce = sce_mpnst_example,
+    group_col = "sample",
+    outer_col = "sample_type",
+    outer_order = c("Nerve", "PNF", "ANF", "MPNST"),
+    foreground = "PRRX1",
+    background = "cluster",
+    reduced_dim = "TSNE",
+    bg_dimming = 0.9,
+    fg_order = "ascending",
+    fg_limits = "shared",
+    shared_legend = TRUE,
+    bg_legend = FALSE,
+    fg_subset_cells = quote(celltype.main == "Mesenchymal")
+)
+p1
+```
+
+# Palettes
+
+`scOverlay` includes several categorical and continuous palettes. They can be listed with `listPalettes()`.
+
+```{r list-palettes}
+listPalettes()
+```
+
+A graphical preview can be generated by setting `plot = TRUE`.
+
+```{r list-palettes-plot, fig.width=9, fig.height=7, fig.wide=TRUE}
+listPalettes(plot = TRUE, n = 50)
+```
+
+Palettes are selected by name with `bg_palette` or `fg_palette`. Continuous palettes are stored internally as anchor colours and interpolated to the number of colours needed for the plot. This also means that user-defined continuous palettes can be provided as a small vector of colours that will be automatically interpolated. All  palettes from CRANpkg("ViridisLite") and CRANpkg("RColorBrewer") are also available.
+
+Here are a few plots with different palettes.
+
+```{r palette-patchwork, fig.width=12, fig.height=12, fig.wide=TRUE}
+my_palettes <- list("gray_red", "blue_gold", "gray_blue", #from scOverlay
+                    "magma", "viridis", "cividis", #from viridisLite 
+                    c("goldenrod", "dodgerblue"), c("cornsilk", "khaki1", "yellow2", "darkgoldenrod"), c("#AAAAEE", "#AAEEEE", "#22DDDD"))
+
+plots <- lapply(my_palettes, function(pal) {
+    plotOverlay(
+        sce = sce_mpnst_example,
+        foreground = "CDH19",
+        background = "solid",
+        reduced_dim = "TSNE",
+        fg_palette = pal,
+        fg_order = "ascending",
+        fg_legend = FALSE,
+        title = pal
+    )
+})
+
+
+patchwork::wrap_plots(plots, ncol = 3)
+```
+
+
+
+## Categorical palettes and Named categorical palettes
+
+The package also includes categorical palettes that will be used for categorical data. Categorical palettes may have names. If all plotted values match those names, colours are matched by name. If none of the plotted values match the names, colours are assigned by position. If only some values match, `scOverlay` raises an error to avoid accidentally remapping colours.
+
+```{r palette-named-categorical}
+sample_type_palette <- c(
+    Nerve = "#4E79A7",
+    PNF = "#59A14F",
+    ANF = "#F28E2B",
+    MPNST = "#E15759"
+)
+
+plotOverlay(
+    sce = sce_mpnst_example,
+    foreground = "sample_type",
+    background = "solid",
+    reduced_dim = "TSNE",
+    fg_type = "categorical",
+    fg_palette = sample_type_palette
+)
+```
+
+The built-in categorical palettes keep integer-like names (`"1"`, `"2"` and `"3"` because these are useful for cluster labels). Use `unname()` to force positional matching, or `setNames()` to define a custom mapping.
+
+```{r palette-named-categorical-rules}
+sample_type_palette <- c(
+    Nerve = "#4E79A7",
+    PNF = "#59A14F",
+    ANF = "#F28E2B",
+    MPNST = "#E15759"
+)
+
+getPalette(
+    palette = sample_type_palette,
+    type = "categorical",
+    values = c("Nerve", "PNF", "ANF", "MPNST")
+)
+
+pal <- getPalette("scOverlay", type = "categorical", n = 4)
+setNames(
+    unname(pal),
+    c("Nerve", "PNF", "ANF", "MPNST")
+)
+```
+
+Using named palettes is recommended to avoid misleading plots when positional matching is used and some plots might be missing some groups.
+
+# Rasterizing dense point layers
+
+Single-cell embeddings can contain thousands or millions of points. When these plots are saved as vector graphics, the resulting PDF or SVG files can become large and slow to open or edit. `scOverlay` can rasterize only the point layers while keeping the rest of the plot as vector graphics.
+
+This means that axes, titles, labels, legends and other plot elements remain editable, while the dense background and/or foreground points are stored as raster images.
+
+Rasterization is controlled independently for the background and foreground layers with `bg_raster` and `fg_raster`.
+
+```{r raster-background}
+p1 <- plotOverlay(
+    sce = sce_mpnst_example,
+    foreground = "SOX10",
+    background = "sample_type",
+    reduced_dim = "TSNE",
+    fg_order = "ascending",
+    bg_raster = TRUE,
+    bg_dimming = 0.7
+)
+p1
+```
+
+A common use case is to rasterize the background, because it usually contains all cells, and keep the foreground as vector points. This can be useful when the foreground contains a smaller number of highlighted cells.
+
+```{r raster-background-only}
+p2 <- plotOverlay(
+    sce = sce_mpnst_example,
+    foreground = "CDH19",
+    background = "sample_type",
+    reduced_dim = "TSNE",
+    fg_subset_cells = quote(sample_type == "MPNST"),
+    fg_order = "ascending",
+    bg_raster = TRUE,
+    fg_raster = FALSE
+)
+p2
+```
+
+When both layers are dense, both can be rasterized.
+
+```{r raster-both, eval=FALSE}
+p3 <- plotOverlay(
+    sce = sce_mpnst_example,
+    foreground = "SOX10",
+    background = "sample_type",
+    reduced_dim = "TSNE",
+    fg_order = "ascending",
+    bg_raster = TRUE,
+    fg_raster = TRUE,
+    raster_dpi = 300
+)
+p3
+```
+
+The resolution of the rasterized layers is controlled with `raster_dpi`. Higher values (600, 1200...) may produce sharper point layers, but also larger output files.
+
+Rasterization is particularly useful when saving plots to PDF or SVG for publication figures, because it reduces the number of vector elements while keeping the text and layout editable.
+
+# Saving plots
+
+The objects returned by `plotOverlay()` are regular `ggplot2` objects, so they can be saved with the standard `ggplot2::ggsave()` function.
+
+```{r save-create-plot}
+p <- plotOverlay(
+    sce = sce_mpnst_example,
+    foreground = "SOX10",
+    background = "sample_type",
+    reduced_dim = "TSNE",
+    fg_order = "ascending",
+    bg_raster = TRUE
+)
+```
+
+The same plot can be saved in different formats depending on the intended use, PNG, PDF, SVG...
+
+
+```{r save-plot-files, eval=FALSE}
+ggplot2::ggsave(
+    filename = "SOX10_overlay.png",
+    plot = p,
+    width = 5,
+    height = 5,
+    dpi = 300
+)
+
+ggplot2::ggsave(
+    filename = "SOX10_overlay.pdf",
+    plot = p,
+    width = 5,
+    height = 5
+)
+
+ggplot2::ggsave(
+    filename = "SOX10_overlay.svg",
+    plot = p,
+    width = 5,
+    height = 5
+)
+```
+
+Grouped plots are saved in the same way: create the plot object first, then pass it to `ggplot2::ggsave()`. For grouped plots, take into account the number pf panels to define the image size.
+
+```{r save-grouped-plot, eval=FALSE}
+p_grouped <- plotOverlayPerGroup(
+    sce = sce_mpnst_example,
+    group_col = "sample_type",
+    group_order = c("Nerve", "PNF", "ANF", "MPNST"),
+    foreground = "SOX10",
+    background = "solid",
+    reduced_dim = "TSNE",
+    fg_order = "ascending"
+)
+
+panel_width <- 4
+panel_height <- 4
+n_panels <- length(unique(sce_mpnst_example$sample_type))
+
+ggplot2::ggsave(
+    filename = "SOX10_by_sample_type.pdf",
+    plot = p_grouped,
+    width = panel_width * n_panels,
+    height = panel_height
+)
+```
+
+
+For very dense plots, it is often a good idea to combine saving to PDF or SVG with point-layer rasterization using `bg_raster`, `fg_raster` or both.
+
+# Session information
+
+```{r session-info}
+sessionInfo()
+```

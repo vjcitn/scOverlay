@@ -1,0 +1,22 @@
+# R package build artifacts
+*Rcheck/
+.RData
+.Rhistory
+.Rproj.user/
+.Ruserdata
+*.Rout
+*.Rout.save
+*.tar.gz
+*.RDataTmp
+
+# Vignettes and rendered outputs
+inst/doc/
+
+# Generated figures and scratch files
+Rplots.pdf
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
