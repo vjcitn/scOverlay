@@ -1,13 +1,13 @@
 <!-- badges: start -->
-[![R-CMD-check](https://github.com/bernatgel/scOverlay/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/bernatgel/scOverlay/actions/workflows/R-CMD-check.yaml)
-[![Bioconductor status](https://bioconductor.org/shields/build/release/bioc/scOverlay.svg)](https://bioconductor.org/packages/scOverlay)
+<!-- [![R-CMD-check](https://github.com/bernatgel/scOverlay/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/bernatgel/scOverlay/actions/workflows/R-CMD-check.yaml)
+[![Bioconductor status](https://bioconductor.org/shields/build/release/bioc/scOverlay.svg)](https://bioconductor.org/packages/scOverlay) -->
 [![License: Artistic-2.0](https://img.shields.io/badge/License-Artistic--2.0-blue.svg)](https://opensource.org/license/artistic-2-0)
 <!-- badges: end -->
 
 # scOverlay: Multilayer plots for single-cell data
 
 <p align="center">
-  <img src="man/figures/scOverlay_logo.png" alt="scOverlay logo" width="220"/>
+  <img width="6000" height="1500" alt="scOverlay example plot" src="https://github.com/user-attachments/assets/8403e754-a709-4e9d-80ad-ced2aa681fbb"/>
 </p>
 
 
